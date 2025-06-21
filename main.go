@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,18 +32,103 @@ func main() {
 		addEntry(os.Args[2])
 	case "list":
 		listEntries()
+	default:
+		fmt.Println("Unknown command. Use: add, list, or get")
 	}
 }
 
 func getHistoryPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".clipstory", "history.json")
+	clipDir := filepath.Join(home, ".clipstory")
+	os.MkdirAll(clipDir, os.FileMode(0755))
+	return filepath.Join(clipDir, "history.json")
+}
+
+func loadHistory() (*History, error) {
+	historyPath := getHistoryPath()
+	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
+		return &History{Entries: []Entry{}}, nil
+	}
+
+	data, err := os.ReadFile(historyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var history History
+
+	if err := json.Unmarshal(data, &history); err != nil {
+		return nil, err
+	}
+
+	return &history, nil
+}
+
+func saveHistory(history *History) error {
+	// only last 100, todo -- respect whatever history settings are already present in bash
+	if len(history.Entries) > 100 {
+		history.Entries = history.Entries[len(history.Entries)-100:]
+	}
+
+	data, err := json.MarshalIndent(history, "", "")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(getHistoryPath(), data, os.FileMode(0644))
 }
 
 func addEntry(content string) {
-	fmt.Printf("Added: %s\n", content)
+	history, err := loadHistory()
+
+	if err != nil {
+		return
+	}
+
+	if len(history.Entries) > 0 && history.Entries[len(history.Entries)-1].Content == content {
+		fmt.Println("Entry already exists as most recent -- SKIPPING")
+		return
+	}
+
+	entry := Entry{
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+
+	history.Entries = append(history.Entries, entry)
+
+	if err := saveHistory(history); err != nil {
+		fmt.Printf("Error saving history: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Added entry #%d\n", len(history.Entries))
+
 }
 
 func listEntries() {
-	fmt.Println("History:")
+	history, err := loadHistory()
+	if err != nil {
+		fmt.Printf("Error loading history: %v\n", err)
+		return
+	}
+
+	if len(history.Entries) == 0 {
+		fmt.Println("No clipboard history")
+		return
+	}
+
+	start := 0
+	if len(history.Entries) > 10 {
+		start = len(history.Entries) - 10
+	}
+
+	for i := start; i < len(history.Entries); i++ {
+		entry := history.Entries[i]
+		content := entry.Content
+		if len(content) > 60 {
+			content = content[:57] + "..."
+		}
+		fmt.Printf("%d: %s (%s)\n", i+1, content, entry.Timestamp.Format("15:04:05"))
+	}
 }
