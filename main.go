@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/gofrs/flock"
 	"os"
 	"path/filepath"
 	"time"
@@ -52,7 +53,18 @@ func getHistoryPath() string {
 	return filepath.Join(clipDir, "history.json")
 }
 
+func getLockPath() string {
+	return getHistoryPath() + ".lock"
+}
+
 func loadHistory() (*History, error) {
+	lock := flock.New(getLockPath())
+	err := lock.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
+
 	historyPath := getHistoryPath()
 	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
 		return &History{Entries: []Entry{}}, nil
@@ -73,6 +85,15 @@ func loadHistory() (*History, error) {
 }
 
 func saveHistory(history *History) error {
+	lock := flock.New(getLockPath())
+	err := lock.Lock()
+
+	if err != nil {
+		return err
+	}
+
+	defer lock.Unlock()
+
 	// only last 100, todo -- respect whatever history settings are already present in bash
 	if len(history.Entries) > 100 {
 		history.Entries = history.Entries[len(history.Entries)-100:]
@@ -82,8 +103,12 @@ func saveHistory(history *History) error {
 	if err != nil {
 		return err
 	}
+	tmpPath := getHistoryPath() + ".tmp"
 
-	return os.WriteFile(getHistoryPath(), data, os.FileMode(0600))
+	if err := os.WriteFile(tmpPath, data, os.FileMode(0600)); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, getHistoryPath())
 }
 
 func addEntry(content string) {
