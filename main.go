@@ -38,9 +38,17 @@ func main() {
 }
 
 func getHistoryPath() string {
+	var clipDir string
+
+	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+		return filepath.Join(xdgDataHome, "clipstory")
+	}
+
 	home, _ := os.UserHomeDir()
-	clipDir := filepath.Join(home, ".clipstory")
-	os.MkdirAll(clipDir, os.FileMode(0755))
+	clipDir = filepath.Join(home, ".local", "share", "clipstory")
+
+	os.MkdirAll(clipDir, os.FileMode(0700))
+
 	return filepath.Join(clipDir, "history.json")
 }
 
@@ -75,7 +83,7 @@ func saveHistory(history *History) error {
 		return err
 	}
 
-	return os.WriteFile(getHistoryPath(), data, os.FileMode(0644))
+	return os.WriteFile(getHistoryPath(), data, os.FileMode(0600))
 }
 
 func addEntry(content string) {
@@ -103,7 +111,6 @@ func addEntry(content string) {
 	}
 
 	fmt.Printf("Added entry #%d\n", len(history.Entries))
-
 }
 
 func listEntries() {
