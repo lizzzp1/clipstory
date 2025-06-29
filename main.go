@@ -10,31 +10,35 @@ import (
 )
 
 type Entry struct {
-	Content   string
-	Timestamp time.Time
+	Content    string
+	WorkingDir string
+	Timestamp  time.Time
 }
 
 type History struct {
-	Entries []Entry `json:"entries"`
+	Entries []Entry
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: clipstory {add|list}")
+		fmt.Println("Usage: whatdidido {add|list}")
 		return
 	}
 
 	switch os.Args[1] {
 	case "add":
 		if len(os.Args) < 3 {
-			fmt.Println("Usage: clipstory add <text>")
+			fmt.Println("Usage: whatdidido add <text>")
 			return
 		}
 		addEntry(os.Args[2])
 	case "list":
 		listEntries()
+	case "summary":
+		flat := len(os.Args) > 2 && os.Args[2] == "--flat"
+		summarizeToday(flat)
 	default:
-		fmt.Println("Unknown command. Use: add, list, or get")
+		fmt.Println("Unknown command. Use: list, or get")
 	}
 }
 
@@ -42,11 +46,11 @@ func getHistoryPath() string {
 	var clipDir string
 
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, "clipstory")
+		return filepath.Join(xdgDataHome, "whatdidido")
 	}
 
 	home, _ := os.UserHomeDir()
-	clipDir = filepath.Join(home, ".local", "share", "clipstory")
+	clipDir = filepath.Join(home, ".local", "share", "whatdidido")
 
 	os.MkdirAll(clipDir, os.FileMode(0700))
 
@@ -122,10 +126,12 @@ func addEntry(content string) {
 		fmt.Println("Entry already exists as most recent -- SKIPPING")
 		return
 	}
+	dir, _ := os.Getwd()
 
 	entry := Entry{
-		Content:   content,
-		Timestamp: time.Now(),
+		Content:    content,
+		WorkingDir: dir,
+		Timestamp:  time.Now(),
 	}
 
 	history.Entries = append(history.Entries, entry)
@@ -146,7 +152,7 @@ func listEntries() {
 	}
 
 	if len(history.Entries) == 0 {
-		fmt.Println("No clipboard history")
+		fmt.Println("No command history")
 		return
 	}
 
@@ -161,6 +167,57 @@ func listEntries() {
 		if len(content) > 60 {
 			content = content[:57] + "..."
 		}
-		fmt.Printf("%d: %s (%s)\n", i+1, content, entry.Timestamp.Format("15:04:05"))
+		fmt.Printf("\033[32m%-40s\033[0m \033[2m[%s]\033[0m \033[36m(%s)\033[0m\n",
+			entry.Content,
+			entry.Timestamp.Format("15:04"),
+			entry.WorkingDir)
 	}
+}
+
+func summarizeToday(flat bool) {
+	history, err := loadHistory()
+	if err != nil {
+		fmt.Println("Error loading history")
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	var todayEntries []Entry
+
+	for _, entry := range history.Entries {
+		if entry.Timestamp.Format("2006-01-02") == today {
+			todayEntries = append(todayEntries, entry)
+		}
+	}
+
+	if flat {
+		for _, entry := range todayEntries {
+			fmt.Printf("%-50s [%s]\n", entry.Content, entry.Timestamp.Format("15:04:05"))
+		}
+		return
+	}
+
+	cmds := unique(todayEntries)
+
+	if len(cmds) == 0 {
+		fmt.Println("No activity logged today.")
+		return
+	}
+
+	fmt.Println("Commands:")
+	for _, e := range cmds {
+		fmt.Println("  -", e.Content)
+	}
+}
+
+func unique(entries []Entry) []Entry {
+	seen := make(map[string]struct{})
+	var out []Entry
+	for _, entry := range entries {
+		if _, ok := seen[entry.Content]; !ok {
+			seen[entry.Content] = struct{}{}
+			out = append(out, entry)
+		}
+	}
+	return out
 }
