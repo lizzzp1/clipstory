@@ -23,14 +23,14 @@ type History struct {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: whatdidido {add|list|summary|sync}")
-		return
+		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "add":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: whatdidido add <text>")
-			return
+			os.Exit(1)
 		}
 		addEntry(os.Args[2])
 	case "list":
@@ -40,8 +40,11 @@ func main() {
 		summarizeToday(flat)
 	case "sync":
 		syncShellHistory()
+	case "--help":
+		fmt.Println("Usage: whatdidido {add|list|summary|sync}")
 	default:
 		fmt.Println("Unknown command. Use: whatdidido {add|list|summary|sync}")
+		os.Exit(1)
 	}
 }
 
@@ -207,66 +210,107 @@ func summarizeToday(flat bool) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
-	var todayEntries []Entry
-
-	for _, entry := range history.Entries {
-		if entry.Timestamp.Format("2006-01-02") == today {
-			todayEntries = append(todayEntries, entry)
-		}
-	}
-
-	cmds := unique(todayEntries)
-
-	if len(cmds) == 0 {
+	todayEntries := findTodayEntries(history)
+	if len(todayEntries) == 0 {
 		fmt.Println("No activity logged today.")
 		return
 	}
+	freq := frequencies(todayEntries)
+	mostUsed, maxCount := findMostUsedCommand(todayEntries)
+	dirUsage := findDirectoryUsage(todayEntries)
 
-	freq := make(map[string]int)
-	for _, entry := range todayEntries {
-		freq[entry.Content]++
+	printDirectoryUsage(dirUsage)
+
+	fmt.Println()
+
+	printCommandUsage(freq)
+	printSummary(todayEntries, mostUsed, maxCount)
+}
+
+func findDirectoryUsage(entries []Entry) map[string]int {
+	dirUsage := make(map[string]int)
+
+	for _, entry := range entries {
+		dir := entry.WorkingDir
+		if dir == "" {
+			dir = "Unknown"
+		}
+		dirUsage[dir]++
 	}
-	for cmd, count := range freq {
-		fmt.Printf("  - %s: %d times\n", cmd, count)
+
+	return dirUsage
+}
+
+func findTodayEntries(history *History) []Entry {
+	today := time.Now()
+	var todayEntries []Entry
+
+	for _, entry := range history.Entries {
+		if entry.Timestamp.Year() == today.Year() &&
+			entry.Timestamp.YearDay() == today.YearDay() {
+			todayEntries = append(todayEntries, entry)
+		}
 	}
+	cmds := unique(todayEntries)
+
+	return cmds
+}
+
+func findMostUsedCommand(entries []Entry) (string, int) {
 	var mostUsed string
-	maxCount, minCount := 0, len(todayEntries)+1
-	for cmd, count := range freq {
+	maxCount := 0
+	freqMap := frequencies(entries)
+
+	for cmd, count := range freqMap {
 		if count > maxCount {
-			mostUsed = cmd
 			maxCount = count
-		}
-		if count < minCount {
-			minCount = count
+			mostUsed = cmd
 		}
 	}
-	fmt.Println("\033[1mCommand Usage Summary:\033[0m")
+
+	return mostUsed, maxCount
+}
+
+func frequencies(entries []Entry) map[string]int {
+	freqMap := make(map[string]int)
+	for _, entry := range entries {
+		cmd := extractCommand(entry.Content)
+		freqMap[cmd]++
+	}
+	return freqMap
+}
+
+func printCommandUsage(freqMap map[string]int) {
+	fmt.Println("\033[1mCommand Usage:\033[0m")
 	fmt.Println(strings.Repeat("-", 40))
 	fmt.Printf("%-30s | %-5s\n", "Command", "Count")
 	fmt.Println(strings.Repeat("-", 40))
-	for cmd, count := range freq {
-		// Remove timestamp if present
-		if idx := strings.Index(cmd, ";"); idx != -1 {
-			cmd = strings.TrimSpace(cmd[idx+1:])
+	for cmd, count := range freqMap {
+		if cmd == "" {
+			cmd = "Unknown"
 		}
 		fmt.Printf("%-30s | %-5d\n", cmd, count)
 	}
 	fmt.Println()
-	dirUsage := make(map[string]int)
-	for _, entry := range todayEntries {
-		dirUsage[entry.WorkingDir]++
-	}
-	fmt.Println("\033[1mCommands by directory:\033[0m")
+}
+
+func printDirectoryUsage(dirUsage map[string]int) {
+	fmt.Println("\033[1mDirectory Usage:\033[0m")
 	fmt.Println(strings.Repeat("-", 40))
-	fmt.Printf("%-30s | %-10s\n", "Directory", "Commands")
+	fmt.Printf("%-30s | %-5s\n", "Directory", "Count")
 	fmt.Println(strings.Repeat("-", 40))
 	for dir, count := range dirUsage {
-		fmt.Printf("%-30s | %-10d\n", dir, count)
+		if dir == "" {
+			dir = "Unknown"
+		}
+		fmt.Printf("%-30s | %-5d\n", dir, count)
 	}
+	fmt.Println()
+}
+
+func printSummary(todayEntries []Entry, mostUsed string, maxCount int) {
 	fmt.Println("\033[1mSummary for Today\033[0m")
 	fmt.Println(strings.Repeat("-", 40))
-
 	fmt.Printf("\033[34m%-25s %-10s %-10s\033[0m\n", "Command", "Count", "Last Used")
 	fmt.Println()
 	fmt.Printf("\033[32mTotal entries:\033[0m %d\n", len(todayEntries))
